@@ -1,0 +1,35 @@
+pipeline {
+    agent any
+    tools {
+        maven "maven"
+    }
+    stages {
+        stage('Clone Repository') {
+            steps {
+                git branch: "dev", url: "https://github.com/14Rahul/AWS-Jenkins.git"
+            }
+        }
+        stage('Build') {
+            steps {
+                sh '''
+                export POM_VER=1.0.0
+                mvn clean install
+                '''
+            }
+        }
+        stage ('Build Information'){
+            steps {
+                script {
+                    githash = sh ( script: "git rev-parse HEAD", returnStdout: true)
+                    currentBuild.description = "${githash}"
+                }
+            }
+            
+        }
+        stage ('Invoke devcodeDeployJob'){
+            steps {
+                build job: 'devcodeDeployJob'
+            }
+        }
+    }
+}
