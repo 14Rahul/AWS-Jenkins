@@ -1,0 +1,28 @@
+#Extended Choice Parameter
+
+#VERSION_NUM
+
+pipeline {
+    agent any
+    parameters {
+        extendedChoice( 
+            name: 'VERSION_NUM', 
+            defaultValue: '', 
+            description: 'Version number to rollback to', 
+            type: 'PT_SINGLE_SELECT', 
+            propertyFile: '/home/ubuntu/versions/version.properties',
+            propertyKey: 'version'
+        )
+    }
+    tools {
+        maven "maven"
+    }
+    stages {
+        stage("Deploy using AWS CodeDeploy") {
+            steps {
+                build job: 'codeDeployJob',
+                parameters: [string( name: 'POM_VER', value: "${params.VERSION_NUM}")]
+            }
+        }
+    }
+}
