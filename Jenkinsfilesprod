@@ -1,0 +1,120 @@
+#ReleaseType
+
+#BUG_FIX
+#MINOR
+#MAJOR
+
+pipeline {
+    agent any
+    parameters {
+        choice choices: ['BUG_FIX', 'MINOR', 'MAJOR'], name: 'ReleaseType'
+    }
+    tools {
+        maven "maven"
+    }
+    stages {
+        stage('Clone Repository') {
+            steps {
+                git branch: "master", url: "https://github.com/Shubhamb7/devops2.git"
+            }
+        }
+        stage('Build') {
+            steps{
+                script {
+                    def lastSuccessBuildName = ""
+                    if (Jenkins.instance.getItem(env.JOB_NAME).lastSuccessfulBuild == null) {
+                        lastSuccessBuildName = "1.0.0"
+                    } else {
+                        lastSuccessBuildName = Jenkins.instance.getItem(env.JOB_NAME).lastSuccessfulBuild.displayName
+                    }
+                    def release = lastSuccessBuildName.split('\\.')
+                    if(params.ReleaseType == "MAJOR") {
+                        Integer major = release[0] as Integer
+                        Integer temp = major + 1
+                        env.POM_VER = "${temp}.0.0"
+                        sh ( script: "mvn clean install")
+                    }else if(params.ReleaseType == "MINOR"){
+                        Integer major = release[0] as Integer
+                        Integer minor = release[1] as Integer
+                        Integer temp = minor + 1
+                        env.POM_VER = "${major}.${temp}.0"
+                        sh ( script: "mvn clean install")
+                    } else if(params.ReleaseType == "BUG_FIX"){
+                        Integer major = release[0] as Integer
+                        Integer minor = release[1] as Integer
+                        Integer bug = release[2] as Integer
+                        Integer temp = bug + 1
+                        env.POM_VER = "${major}.${minor}.${temp}"
+                        sh ( script: "mvn clean install")
+                    }
+                }
+            }
+        }
+        stage ('Publish To Nexus') {
+            steps{
+                script {
+                    //deploy artifact to nexus repo
+                    
+                    nexusArtifactUploader artifacts: [
+                        [
+                            artifactId: 'testapp', 
+                            classifier: '', 
+                            file: "/var/lib/jenkins/workspace/ProdPipeline/target/testapp-${env.POM_VER}-SNAPSHOT.jar", 
+                            type: 'jar'
+                        ]
+                    ], 
+                    credentialsId: 'dc141bc2-0725-4013-b56a-e362a2a64b0f', 
+                    groupId: 'com.spring', 
+                    nexusUrl: '34.229.226.67:8081', 
+                    nexusVersion: 'nexus3', 
+                    protocol: 'http', 
+                    repository: 'app-snapshots', 
+                    version: "${env.POM_VER}"
+                }
+            }
+        }
+        stage ('Deploy using CodeDeploy'){
+            steps {
+                build job: 'codeDeployJob',
+                parameters: [string( name: 'POM_VER', value: "${env.POM_VER}")]
+            }
+        }
+        stage ('Build Information'){
+            steps {
+                script {
+
+                    // Set build name and description to version number and git commit hash accordingly
+
+                    githash = sh ( script: "git log -n 1 --pretty=format:'%H'", returnStdout: true)
+                    currentBuild.displayName = "${env.POM_VER}"
+                    currentBuild.description = "${githash}"
+                    
+                    // Get versions from all pages and store in a variable
+                    
+                    sh "chmod +x -R ${env.WORKSPACE}"
+                    versions = sh ( script: "./nexus-versions.sh", returnStdout: true)
+                    
+                    // keep only versions greater than n-2, where n is current version
+                    
+                    Integer RealMajor = env.POM_VER.split('\\.')[0] as Integer
+                    def listOfVersions = versions.split('\n')
+                    def listOfVersionsStr = ""
+                    Integer sortedListOfVersionsStr = 0
+                    for(int i=0; i < listOfVersions.size(); i++){
+                        Integer major = listOfVersions[i].split('\\.')[0] as Integer
+                        if(major >= RealMajor - 1){
+                            sortedListOfVersionsStr++
+                            listOfVersionsStr = listOfVersionsStr+"${listOfVersions[i]},"
+                        }
+                    }
+                    
+                    // write versions to property file
+                    
+                    File file = new File('/home/ubuntu/versions/version.properties')
+                    def newString = "version="+listOfVersionsStr.replaceFirst('.$','')
+                    file.write(newString)
+                }
+            }
+        }
+    }
+}
